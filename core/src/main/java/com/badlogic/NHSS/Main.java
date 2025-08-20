@@ -18,6 +18,9 @@ import com.badlogic.gdx.utils.TimeUtils;
 import com.badlogic.gdx.utils.viewport.FitViewport;
 import com.badlogic.gdx.utils.viewport.Viewport;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
+import com.badlogic.gdx.audio.Sound;
+import com.badlogic.gdx.audio.Music;
+
 
 
 public class Main extends ApplicationAdapter {
@@ -62,6 +65,13 @@ public class Main extends ApplicationAdapter {
     private int score = 0, lives = 3;
     private float flashAlpha = 0f;
 
+    // --- Game state ---
+    private enum GameState { PLAYING, GAME_OVER }
+    private GameState state = GameState.PLAYING;
+
+    private static final long GAME_OVER_DELAY_MS = 5_000L;
+    private long gameOverAtMs = 0L;
+
     private static final String[] STORE_HOURS = {
         "NERD HAVEN ARCADE","STORE HOURS:",
         "MONDAY: CLOSED","TUESDAY: CLOSED",
@@ -79,8 +89,14 @@ public class Main extends ApplicationAdapter {
         "xxxxxxxxxxx",
         "xxx     xxx",
         "xx       xx"
+
+
     };
     private static final int BLOCK = 10;
+
+    // Audio
+    private Music music;
+    private Sound sLaser, sExplosion;
 
     @Override public void create() {
         cam = new OrthographicCamera();
@@ -120,7 +136,18 @@ public class Main extends ApplicationAdapter {
         texGreen  = loadNearest("Graphics/Green.png");
         texYellow = loadNearest("Graphics/Yellow.png");
 
+        // Audio (exact filenames under assets/Audio)
+        music = Gdx.audio.newMusic(Gdx.files.internal("Audio/Music.wav"));
+        music.setLooping(true);
+        music.setVolume(0.5f); // tweak
+
+        sLaser     = Gdx.audio.newSound(Gdx.files.internal("Audio/Laser.wav"));
+        sExplosion = Gdx.audio.newSound(Gdx.files.internal("Audio/Explosion.wav"));
+
         initGame();
+        state = GameState.PLAYING;
+        gameOverAtMs = 0L;
+        if (music != null && !music.isPlaying()) music.play();
     }
 
     private Texture loadNearest(String path) {
@@ -130,11 +157,15 @@ public class Main extends ApplicationAdapter {
     }
 
     private void initGame() {
-        // Stars
-        stars.clear();
-        for (int i = 0; i < 120; i++) {
-            stars.add(new Star(MathUtils.random(VW), MathUtils.random(VH),
-                MathUtils.random(STAR_MIN_SPEED, STAR_MAX_SPEED)));
+        // Stars (build once, keep across restarts)
+        if (stars.size == 0) {
+            for (int i = 0; i < 120; i++) {
+                stars.add(new Star(
+                    MathUtils.random(VW),
+                    MathUtils.random(VH),
+                    MathUtils.random(STAR_MIN_SPEED, STAR_MAX_SPEED)
+                ));
+            }
         }
 
         // Player at the very bottom
@@ -162,6 +193,12 @@ public class Main extends ApplicationAdapter {
         scheduleUFO();
 
         score = 0; lives = 3; flashAlpha = 0f; lastAlienShot = 0;
+
+        // put the game back into PLAYING and restart music
+        state = GameState.PLAYING;
+        gameOverAtMs = 0L;
+        if (music != null && !music.isPlaying()) music.play();
+
     }
 
     private void createShield(float xs, float ys, float offX) {
@@ -242,7 +279,17 @@ public class Main extends ApplicationAdapter {
         layout.setText(hudFont, "Score: " + score);
         hudFont.draw(batch, layout, 10f, VH - 18f);
 
-// Centered store hours
+        if (state == GameState.GAME_OVER) {
+            // Big headline at the top
+            String title = "GAME OVER";
+            layout.setText(bodyFont, title); // bodyFont is your larger font
+            float x = (VW - layout.width) * 0.5f;
+            float y = VH - 60f; // near the top edge
+            bodyFont.setColor(Color.WHITE);
+            bodyFont.draw(batch, layout, x, y);
+        }
+
+        // Centered store hours
         float lineH = 100f; // tweak spacing
         float totalH = STORE_HOURS.length * lineH;
         float startY = (VH + totalH) * 0.5f;
@@ -288,10 +335,29 @@ public class Main extends ApplicationAdapter {
         shapes.end();
     }
 
+    private void triggerGameOver() {
+        if (state == GameState.GAME_OVER) return;
+        state = GameState.GAME_OVER;
+        gameOverAtMs = TimeUtils.millis();
+        playerLasers.clear();
+        alienLasers.clear();
+        flashAlpha = 0f;
+        if (music != null && music.isPlaying()) music.stop();   // <-- stop music here
+    }
+
     private void update(float dt) {
         long now = TimeUtils.millis();
+        dt = Math.min(dt, 1f/60f * 2f);
 
-        // Stars
+        // GAME OVER gate — pause EVERYTHING until restart
+        if (state == GameState.GAME_OVER) {
+            if (now - gameOverAtMs >= GAME_OVER_DELAY_MS) {
+                initGame();
+            }
+            return;
+        }
+
+        // Stars animate only while playing
         for (Star s : stars) {
             s.y += s.speed * dt;
             if (s.y > VH) { s.y = 0; s.x = MathUtils.random(VW); }
@@ -300,14 +366,16 @@ public class Main extends ApplicationAdapter {
         // Player AI (simple dodge + weave + shoot)
         playerAI(now, dt);
 
-        // Lasers
+        // Lasers (move + record lastY)
         for (int i = playerLasers.size-1; i >= 0; i--) {
             Laser l = playerLasers.get(i);
+            l.lastY = l.y;
             l.y += l.vy * dt;
             if (l.y > VH + 50) playerLasers.removeIndex(i);
         }
         for (int i = alienLasers.size-1; i >= 0; i--) {
             Laser l = alienLasers.get(i);
+            l.lastY = l.y;
             l.y += l.vy * dt;
             if (l.y < -50) alienLasers.removeIndex(i);
         }
@@ -320,6 +388,7 @@ public class Main extends ApplicationAdapter {
         if (now - lastAlienShot >= ALIEN_SHOOT_MS && aliens.size > 0) {
             Alien s = aliens.get(MathUtils.random(aliens.size - 1));
             alienLasers.add(new Laser(s.cx(), s.cy(), LASER_ALIEN_V));
+            if (sLaser != null) sLaser.play(0.4f); // quieter
             lastAlienShot = now;
         }
 
@@ -333,7 +402,7 @@ public class Main extends ApplicationAdapter {
             if (extra.x < -100 || extra.x > VW + 100) extra = null;
         }
 
-        // Collisions
+        // Collisions (this may call triggerGameOver())
         handleCollisions();
 
         // Respawn wave
@@ -352,21 +421,41 @@ public class Main extends ApplicationAdapter {
     }
 
     private void handleCollisions() {
-        // Player lasers
-        for (int i = playerLasers.size-1; i >= 0; i--) {
+        // ----- Player lasers
+        for (int i = playerLasers.size - 1; i >= 0; i--) {
             Laser l = playerLasers.get(i);
-            boolean removed = false;
 
-            for (int b = blocks.size-1; b >= 0; b--) {
-                if (overlaps(l.x-4, l.y, 8, 20, blocks.get(b).x, blocks.get(b).y, blocks.get(b).w, blocks.get(b).h)) {
-                    blocks.removeIndex(b); playerLasers.removeIndex(i); removed = true; break;
+            // Swept shield hit (laser goes UP)
+            Block firstHitUp = null;
+            float minX = l.x - 4f, maxX = l.x + 4f;
+            float segY0 = Math.min(l.lastY, l.y), segY1 = Math.max(l.lastY, l.y);
+            float earliestBottom = Float.MAX_VALUE; // earliest contact for upward travel
+
+            for (int b = 0; b < blocks.size; b++) {
+                Block bk = blocks.get(b);
+                boolean xOverlap = maxX > bk.x && minX < bk.x + bk.w;
+                boolean yOverlap = segY1 > bk.y && segY0 < bk.y + bk.h;
+                if (xOverlap && yOverlap) {
+                    if (bk.y < earliestBottom) { // lowest bottom edge along path
+                        earliestBottom = bk.y;
+                        firstHitUp = bk;
+                    }
                 }
             }
-            if (removed) continue;
+            if (firstHitUp != null) {
+                blocks.removeValue(firstHitUp, true);
+                playerLasers.removeIndex(i);
+                flashAlpha = Math.min(1f, flashAlpha + 0.3f);
+                continue;
+            }
 
+            // Aliens
             Array<Alien> hits = new Array<>();
-            for (Alien a : aliens) if (overlaps(l.x-4, l.y, 8, 20, a.x, a.y, a.w, a.h)) hits.add(a);
+            for (Alien a : aliens)
+                if (overlaps(l.x - 4, l.y, 8, 20, a.x, a.y, a.w, a.h)) hits.add(a);
+
             if (hits.size > 0) {
+                if (sExplosion != null) sExplosion.play(0.8f);
                 for (Alien a : hits) score += a.value;
                 for (Alien a : hits) aliens.removeValue(a, true);
                 playerLasers.removeIndex(i);
@@ -374,40 +463,65 @@ public class Main extends ApplicationAdapter {
                 continue;
             }
 
-            if (extra != null && overlaps(l.x-4, l.y, 8, 20, extra.x, extra.y, 64, 32)) {
-                score += 500; extra = null; playerLasers.removeIndex(i);
+            // Extra
+            if (extra != null && overlaps(l.x - 4, l.y, 8, 20, extra.x, extra.y, 64, 32)) {
+                score += 500;
+                if (sExplosion != null) sExplosion.play(0.8f);
+                extra = null;
+                playerLasers.removeIndex(i);
                 flashAlpha = Math.min(1f, flashAlpha + 0.7f);
+                continue;
             }
         }
 
-        // Alien lasers
-        for (int i = alienLasers.size-1; i >= 0; i--) {
+        // ----- Alien lasers
+        for (int i = alienLasers.size - 1; i >= 0; i--) {
             Laser l = alienLasers.get(i);
-            boolean removed = false;
 
-            for (int b = blocks.size-1; b >= 0; b--) {
-                if (overlaps(l.x-4, l.y, 8, 20, blocks.get(b).x, blocks.get(b).y, blocks.get(b).w, blocks.get(b).h)) {
-                    blocks.removeIndex(b); alienLasers.removeIndex(i); removed = true; break;
+            // Swept shield hit (laser goes DOWN)
+            Block firstHitDown = null;
+            float minX = l.x - 4f, maxX = l.x + 4f;
+            float segY0 = Math.min(l.lastY, l.y), segY1 = Math.max(l.lastY, l.y);
+            float earliestTop = -Float.MAX_VALUE; // earliest contact for downward travel
+
+            for (int b = 0; b < blocks.size; b++) {
+                Block bk = blocks.get(b);
+                boolean xOverlap = maxX > bk.x && minX < bk.x + bk.w;
+                boolean yOverlap = segY1 > bk.y && segY0 < bk.y + bk.h;
+                if (xOverlap && yOverlap) {
+                    float top = bk.y + bk.h;
+                    if (top > earliestTop) { // highest top edge along path
+                        earliestTop = top;
+                        firstHitDown = bk;
+                    }
                 }
             }
-            if (removed) continue;
+            if (firstHitDown != null) {
+                blocks.removeValue(firstHitDown, true);
+                alienLasers.removeIndex(i);
+                flashAlpha = Math.min(1f, flashAlpha + 0.3f);
+                continue;
+            }
 
-            if (overlaps(l.x-4, l.y, 8, 20, player.x, player.y, player.w, player.h)) {
+            // Player
+            if (overlaps(l.x - 4, l.y, 8, 20, player.x, player.y, player.w, player.h)) {
                 alienLasers.removeIndex(i);
                 lives--;
                 flashAlpha = Math.min(1f, flashAlpha + 0.6f);
-                if (lives <= 0) { initGame(); return; }
+                if (lives <= 0) { triggerGameOver(); return; }
             }
         }
 
-        // Aliens vs shields/player
-        for (int a = aliens.size-1; a >= 0; a--) {
+        // ----- Aliens vs shields/player
+        for (int a = aliens.size - 1; a >= 0; a--) {
             Alien al = aliens.get(a);
-            for (int b = blocks.size-1; b >= 0; b--) {
+            for (int b = blocks.size - 1; b >= 0; b--) {
                 if (overlaps(al.x, al.y, al.w, al.h, blocks.get(b).x, blocks.get(b).y, blocks.get(b).w, blocks.get(b).h))
                     blocks.removeIndex(b);
             }
-            if (overlaps(al.x, al.y, al.w, al.h, player.x, player.y, player.w, player.h)) { initGame(); return; }
+            if (overlaps(al.x, al.y, al.w, al.h, player.x, player.y, player.w, player.h)) {
+                triggerGameOver(); return;
+            }
         }
     }
 
@@ -441,6 +555,7 @@ public class Main extends ApplicationAdapter {
                 player.lastShot = now;
                 player.lastCooldownStart = now;
                 playerLasers.add(new Laser(player.x + player.w/2f, player.y + player.h, LASER_PLAYER_V));
+                if (sLaser != null) sLaser.play(0.7f);
             }
         }
         if (!player.ready && (now - player.lastCooldownStart >= player.cooldownMs)) player.ready = true;
@@ -457,18 +572,47 @@ public class Main extends ApplicationAdapter {
         return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
     }
 
+    private Sound loadSound(String path) {
+        if (Gdx.files.internal(path).exists()) return Gdx.audio.newSound(Gdx.files.internal(path));
+        Gdx.app.log("audio", "Missing sound: " + path);
+        return null;
+    }
+
+    private Music loadMusic(String path, boolean loop, float vol) {
+        if (!Gdx.files.internal(path).exists()) { Gdx.app.log("audio", "Missing music: " + path); return null; }
+        Music m = Gdx.audio.newMusic(Gdx.files.internal(path));
+        m.setLooping(loop);
+        m.setVolume(vol);
+        return m;
+    }
+
+    private void play(Sound s, float vol) { if (s != null) s.play(vol); }
+
     // Data
     private enum TexKind { RED, GREEN, YELLOW }
 
     private static class Star { float x,y,speed; Star(float x,float y,float s){this.x=x;this.y=y;this.speed=s;} }
+
     private static class Block { float x,y,w,h; Color color; Block(float x,float y,float w,float h,Color c){this.x=x;this.y=y;this.w=w;this.h=h;this.color=c;} }
+
     private static class Alien {
         float x,y,w,h; TexKind k; int value;
         Alien(float x,float y,float w,float h,TexKind k,int v){this.x=x;this.y=y;this.w=w;this.h=h;this.k=k;this.value=v;}
         float cx(){return x + w/2f;} float cy(){return y + h/2f;}
     }
+
     private static class Extra { float x,y,vx; Extra(float x,float y,float vx){this.x=x;this.y=y;this.vx=vx;} }
-    private static class Laser { float x,y,vy; Laser(float x,float y,float vy){this.x=x;this.y=y;this.vy=vy;} }
+
+    private static class Laser {
+        float x, y, vy, lastY;
+        Laser(float x, float y, float vy) {
+            this.x = x;
+            this.y = y;
+            this.vy = vy;
+            this.lastY = y; // remember where it was last frame
+        }
+    }
+
     private static class Player {
         float x,y,w,h; int dir = MathUtils.randomBoolean()?1:-1;
         long moveResumeAt = TimeUtils.millis(), lastFlipAnchor = moveResumeAt;
@@ -490,5 +634,8 @@ public class Main extends ApplicationAdapter {
         texRed.dispose();
         texGreen.dispose();
         texYellow.dispose();
+        music.dispose();
+        sLaser.dispose();
+        sExplosion.dispose();
     }
 }
