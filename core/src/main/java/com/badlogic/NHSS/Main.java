@@ -192,7 +192,7 @@ public class Main extends ApplicationAdapter {
         extra = null;
         scheduleUFO();
 
-        score = 0; lives = 3; flashAlpha = 0f; lastAlienShot = 0;
+        score = 0; lives = 3; flashAlpha = 0f; lastAlienShot = TimeUtils.millis();
 
         // put the game back into PLAYING and restart music
         state = GameState.PLAYING;
