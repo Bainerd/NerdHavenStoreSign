@@ -1,0 +1,16 @@
+[compileJava, compileTestJava]*.options*.encoding = 'UTF-8'
+eclipse.project.name = appName + '-core'
+
+dependencies {
+  api "com.badlogicgames.gdx:gdx:$gdxVersion"
+  api "com.badlogicgames.gdx:gdx-box2d:$gdxVersion"       // keep if you actually use Box2D
+
+  // <-- Add this unconditionally
+  implementation "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
+
+  // keep the Graal block if you need it, but FreeType is now always present
+  if (enableGraalNative == 'true') {
+    implementation "io.github.berstanio:gdx-svmhelper-annotations:$graalHelperVersion"
+    // implementation "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"  // redundant now
+  }
+}
