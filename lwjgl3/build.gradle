@@ -32,17 +32,14 @@ dependencies {
   implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
   implementation "com.badlogicgames.gdx:gdx-box2d-platform:$gdxVersion:natives-desktop"
   implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
-  implementation "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
-  implementation "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
-  implementation "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
+  implementation "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"   // keep ONE
   implementation project(':core')
-  implementation("com.badlogicgames.gdx:gdx-tools:$gdxVersion"){exclude group: 'com.badlogicgames.gdx', module: 'gdx-backend-lwjgl'}
+  implementation("com.badlogicgames.gdx:gdx-tools:$gdxVersion"){ exclude group: 'com.badlogicgames.gdx', module: 'gdx-backend-lwjgl' }
 
-  if(enableGraalNative == 'true') {
+  if (enableGraalNative == 'true') {
     implementation "io.github.berstanio:gdx-svmhelper-backend-lwjgl3:$graalHelperVersion"
-      implementation "io.github.berstanio:gdx-svmhelper-extension-box2d:$graalHelperVersion"
-
-    }
+    implementation "io.github.berstanio:gdx-svmhelper-extension-box2d:$graalHelperVersion"
+  }
 }
 
 def os = System.properties['os.name'].toLowerCase()
@@ -97,11 +94,19 @@ tasks.register("jarLinux") {
   dependsOn("jar")
   group("build")
   jar.archiveFileName.set("${appName}-${projectVersion}-linux.jar")
-  jar.exclude("windows/x86/**", "windows/x64/**", "macos/arm64/**", "macos/x64/**", "**/*.dll", "**/*.dylib",
-    'META-INF/INDEX.LIST', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA')
+  jar.exclude(
+    "windows/x86/**", "windows/x64/**",
+    "macos/arm64/**", "macos/x64/**",
+    "**/*.dll", "**/*.dylib",          // keep these excludes
+    // DO NOT EXCLUDE **/*.so for Linux
+    'META-INF/INDEX.LIST', 'META-INF/*.SF', 'META-INF/*.DSA', 'META-INF/*.RSA'
+  )
   dependencies {
-    jar.exclude("windows/x86/**", "windows/x64/**", "macos/arm64/**", "macos/x64/**",
-      'META-INF/INDEX.LIST', 'META-INF/maven/**')
+    jar.exclude(
+      "windows/x86/**", "windows/x64/**",
+      "macos/arm64/**", "macos/x64/**",
+      'META-INF/INDEX.LIST', 'META-INF/maven/**'
+    )
   }
 }
 

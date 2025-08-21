@@ -8,10 +8,13 @@ import com.badlogic.gdx.graphics.GL20;
 import com.badlogic.gdx.graphics.OrthographicCamera;
 import com.badlogic.gdx.graphics.Texture;
 import com.badlogic.gdx.graphics.g2d.BitmapFont;
+import com.badlogic.gdx.graphics.g2d.BitmapFontCache;
 import com.badlogic.gdx.graphics.g2d.GlyphLayout;
 import com.badlogic.gdx.graphics.g2d.SpriteBatch;
-import com.badlogic.gdx.graphics.glutils.ShapeRenderer;
+import com.badlogic.gdx.graphics.g2d.TextureRegion;
+import com.badlogic.gdx.graphics.glutils.FrameBuffer;
 import com.badlogic.gdx.math.MathUtils;
+import com.badlogic.gdx.math.Matrix4;
 import com.badlogic.gdx.utils.Array;
 import com.badlogic.gdx.utils.ScreenUtils;
 import com.badlogic.gdx.utils.TimeUtils;
@@ -20,10 +23,17 @@ import com.badlogic.gdx.utils.viewport.Viewport;
 import com.badlogic.gdx.graphics.g2d.freetype.FreeTypeFontGenerator;
 import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.audio.Music;
-
-
+import com.badlogic.gdx.graphics.Pixmap;
 
 public class Main extends ApplicationAdapter {
+
+    // Low-res offscreen target (2x upscale to 1080x1920)
+    private static final int LOW_W = 540, LOW_H = 960;
+    private FrameBuffer lowResFbo;
+    private TextureRegion lowResRegion;
+
+    // Cache for static "store hours" text (so we don't recompute every frame)
+    private BitmapFontCache hoursCache;
 
     // Portrait virtual size
     private static final float VW = 1080f;
@@ -40,7 +50,7 @@ public class Main extends ApplicationAdapter {
 
     private OrthographicCamera cam;
     private Viewport viewport;
-    private ShapeRenderer shapes;
+    private Texture white;      // 1x1 white pixel
     private SpriteBatch batch;
     private BitmapFont hudFont;   // for "Score"
     private BitmapFont bodyFont;  // for store hours
@@ -75,8 +85,8 @@ public class Main extends ApplicationAdapter {
     private static final String[] STORE_HOURS = {
         "NERD HAVEN ARCADE","STORE HOURS:",
         "MONDAY: CLOSED","TUESDAY: CLOSED",
-        "WEDNESDAY: 3 pm - 11 pm","THURSDAY: 3 pm - 11 pm",
-        "FRIDAY: 3 pm - 11 pm","SATURDAY: 3 pm - 11 pm",
+        "WEDNESDAY: CLOSED","THURSDAY: 3 pm - 10 pm",
+        "FRIDAY: NOON - 10 pm","SATURDAY: NOON - 10 pm",
         "SUNDAY: NOON - 8 pm"
     };
 
@@ -89,8 +99,6 @@ public class Main extends ApplicationAdapter {
         "xxxxxxxxxxx",
         "xxx     xxx",
         "xx       xx"
-
-
     };
     private static final int BLOCK = 10;
 
@@ -104,8 +112,8 @@ public class Main extends ApplicationAdapter {
         viewport.apply(true);
         cam.position.set(VW/2f, VH/2f, 0);
 
-        shapes = new ShapeRenderer();
         batch  = new SpriteBatch();
+
         // -- Pixel font from assets/Font/Pixeled.ttf
         FreeTypeFontGenerator gen = new FreeTypeFontGenerator(Gdx.files.internal("Font/Pixeled.ttf"));
         FreeTypeFontGenerator.FreeTypeFontParameter p = new FreeTypeFontGenerator.FreeTypeFontParameter();
@@ -129,12 +137,24 @@ public class Main extends ApplicationAdapter {
         hudFont.setUseIntegerPositions(true);
         bodyFont.setUseIntegerPositions(true);
 
+        // Make font atlas pages NEAREST too
+        for (TextureRegion tr : hudFont.getRegions())  tr.getTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        for (TextureRegion tr : bodyFont.getRegions()) tr.getTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+
         // Load sprites from assets/Graphics
         texPlayer = loadNearest("Graphics/Player.png");
         texExtra  = loadNearest("Graphics/Extra.png");
         texRed    = loadNearest("Graphics/Red.png");
         texGreen  = loadNearest("Graphics/Green.png");
         texYellow = loadNearest("Graphics/Yellow.png");
+
+        // White 1x1
+        Pixmap pm = new Pixmap(1, 1, Pixmap.Format.RGBA8888);
+        pm.setColor(Color.WHITE);
+        pm.fill();
+        white = new Texture(pm);
+        white.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+        pm.dispose();
 
         // Audio (exact filenames under assets/Audio)
         music = Gdx.audio.newMusic(Gdx.files.internal("Audio/Music.wav"));
@@ -143,6 +163,27 @@ public class Main extends ApplicationAdapter {
 
         sLaser     = Gdx.audio.newSound(Gdx.files.internal("Audio/Laser.wav"));
         sExplosion = Gdx.audio.newSound(Gdx.files.internal("Audio/Explosion.wav"));
+
+        // FBO for low-res rendering
+        lowResFbo = new FrameBuffer(Pixmap.Format.RGB565, LOW_W, LOW_H, false);
+        lowResRegion = new TextureRegion(lowResFbo.getColorBufferTexture());
+        lowResRegion.flip(false, true); // FBO textures come upside-down
+        lowResRegion.getTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
+
+        // Pre-cache store hours text positions so we don't do layout work each frame
+        hoursCache = new BitmapFontCache(bodyFont, true);
+        float lineH = 100f;
+        float totalH = STORE_HOURS.length * lineH;
+        float startY = (VH + totalH) * 0.5f;
+        for (int i = 0; i < STORE_HOURS.length; i++) {
+            layout.setText(bodyFont, STORE_HOURS[i]);
+            float x = (VW - layout.width) * 0.5f;
+            float y = startY - i * lineH;
+            hoursCache.addText(STORE_HOURS[i], x, y);
+        }
+
+        // Small GL driver hints for Pi
+        Gdx.gl.glDisable(GL20.GL_DITHER);
 
         initGame();
         state = GameState.PLAYING;
@@ -198,7 +239,6 @@ public class Main extends ApplicationAdapter {
         state = GameState.PLAYING;
         gameOverAtMs = 0L;
         if (music != null && !music.isPlaying()) music.play();
-
     }
 
     private void createShield(float xs, float ys, float offX) {
@@ -240,99 +280,98 @@ public class Main extends ApplicationAdapter {
 
     @Override public void render() {
         if (Gdx.input.isKeyJustPressed(Input.Keys.ESCAPE)) Gdx.app.exit();
-
         float dt = Gdx.graphics.getDeltaTime();
         update(dt);
 
-        ScreenUtils.clear(30/255f, 30/255f, 30/255f, 1f);
+        // --- Draw scene at half resolution ---
+        lowResFbo.begin();
+        Gdx.gl.glViewport(0, 0, LOW_W, LOW_H);
+        Gdx.gl.glClearColor(30/255f, 30/255f, 30/255f, 1f);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+
         cam.update();
-
-        // --- Pass 1: stars + shields (shapes)
-        shapes.setProjectionMatrix(cam.combined);
-        shapes.begin(ShapeRenderer.ShapeType.Filled);
-
-        shapes.setColor(Color.WHITE);
-        for (Star s : stars) shapes.circle(s.x, s.y, 2f, 8);
-
-        for (Block b : blocks) { shapes.setColor(b.color); shapes.rect(b.x, b.y, b.w, b.h); }
-
-        shapes.end();
-
-        // --- Pass 2: sprites (batch): aliens, player, extra
         batch.setProjectionMatrix(cam.combined);
         batch.begin();
 
-        // Aliens
+        // OPAQUE PASS (blending OFF): stars, shields, lasers, lives
+        batch.disableBlending();
+
+        // Stars (2x2)
+        batch.setColor(Color.WHITE);
+        for (Star s : stars) batch.draw(white, s.x - 1f, s.y - 1f, 2f, 2f);
+
+        // Shields
+        for (Block b : blocks) { batch.setColor(b.color); batch.draw(white, b.x, b.y, b.w, b.h); }
+        batch.setColor(Color.WHITE);
+
+        // Lasers
+        for (Laser l : playerLasers) batch.draw(white, l.x - 4f, l.y, 8f, 20f);
+        batch.setColor(1f, .6f, .8f, 1f);
+        for (Laser l : alienLasers)  batch.draw(white, l.x - 4f, l.y, 8f, 20f);
+        batch.setColor(Color.WHITE);
+
+        // Lives
+        for (int i = 0; i < lives - 1; i++) batch.draw(white, VW - 40f - i*30f, VH - 28f, 24f, 12f);
+
+        // ALPHA PASS (blending ON): sprites, text, flash
+        batch.enableBlending();
+
+        // Aliens / UFO / Player
         for (Alien a : aliens) {
             Texture t = (a.k == TexKind.RED) ? texRed : (a.k == TexKind.GREEN) ? texGreen : texYellow;
             batch.draw(t, a.x, a.y, a.w, a.h);
         }
-
-        // Extra UFO at the very top row
         if (extra != null) batch.draw(texExtra, extra.x, extra.y, 64f, 32f);
-
-        // Player
         batch.draw(texPlayer, player.x, player.y, player.w, player.h);
 
-        // HUD text
-        hudFont.setColor(Color.WHITE);
+        // HUD: Score
         layout.setText(hudFont, "Score: " + score);
+        hudFont.setColor(Color.WHITE);
         hudFont.draw(batch, layout, 10f, VH - 18f);
 
+        // GAME OVER title at top
         if (state == GameState.GAME_OVER) {
-            // Big headline at the top
             String title = "GAME OVER";
-            layout.setText(bodyFont, title); // bodyFont is your larger font
-            float x = (VW - layout.width) * 0.5f;
-            float y = VH - 60f; // near the top edge
-            bodyFont.setColor(Color.WHITE);
-            bodyFont.draw(batch, layout, x, y);
+            layout.setText(bodyFont, title);
+            bodyFont.draw(batch, layout, (VW - layout.width) * 0.5f, VH - 60f);
         }
 
-        // Centered store hours
-        float lineH = 100f; // tweak spacing
-        float totalH = STORE_HOURS.length * lineH;
-        float startY = (VH + totalH) * 0.5f;
-
-        for (int i = 0; i < STORE_HOURS.length; i++) {
-            layout.setText(bodyFont, STORE_HOURS[i]);
-            float x = (VW - layout.width) * 0.5f;
-            float y = startY - i * lineH;
-            bodyFont.draw(batch, layout, x, y);
-        }
-
-        batch.end();
-
-        // --- Pass 3: lasers (shapes) on top
-        shapes.begin(ShapeRenderer.ShapeType.Filled);
-        shapes.setColor(Color.WHITE);
-        for (Laser l : playerLasers) shapes.rect(l.x - 4f, l.y, 8f, 20f);
-        shapes.setColor(1f, .6f, .8f, 1f);
-        for (Laser l : alienLasers) shapes.rect(l.x - 4f, l.y, 8f, 20f);
-        shapes.end();
+        // Store hours (cached)
+        hoursCache.draw(batch);
 
         // Flash overlay
         if (flashAlpha > 0f) {
-            Gdx.gl.glEnable(GL20.GL_BLEND);
-            shapes.begin(ShapeRenderer.ShapeType.Filled);
-            shapes.setColor(1f, 1f, 1f, flashAlpha);
-            shapes.rect(0, 0, VW, VH);
-            shapes.end();
-            Gdx.gl.glDisable(GL20.GL_BLEND);
+            batch.setColor(1f, 1f, 1f, flashAlpha);
+            batch.draw(white, 0, 0, VW, VH);
+            batch.setColor(Color.WHITE);
         }
 
-        // CRT scanlines
-        shapes.begin(ShapeRenderer.ShapeType.Line);
-        shapes.setColor(Color.BLACK);
-        for (int y = 0; y < VH; y += 3) shapes.line(0, y, VW, y);
-        shapes.end();
+        batch.end();
+        lowResFbo.end();
 
-        // Lives (mini ships) — draw after lines to keep them visible
-        shapes.begin(ShapeRenderer.ShapeType.Filled);
-        shapes.setColor(120/255f, 220/255f, 1f, 1f);
-        float iconX = VW - 40f, iconY = VH - 28f;
-        for (int i = 0; i < lives - 1; i++) shapes.rect(iconX - i*30f, iconY, 24f, 12f);
-        shapes.end();
+        // --- Upscale once to the window (rotate to portrait while OS stays landscape) ---
+        int bw = Gdx.graphics.getBackBufferWidth();
+        int bh = Gdx.graphics.getBackBufferHeight();
+        Gdx.gl.glViewport(0, 0, bw, bh);
+        Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
+
+        // Screen-space ortho
+        batch.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0, bw, bh));
+
+        // Rotate CCW 90°, then scale to fill exactly (mapping VWxVH -> bxh)
+        Matrix4 xf = new Matrix4()
+            .translate(bw, 0, 0)                // move origin to right edge
+            .rotate(0, 0, 1, 90)                // rotate portrait -> landscape
+            .scale((float) bh / VW, (float) bw / VH, 1f); // exact aspect match
+
+        batch.setTransformMatrix(xf);
+        batch.begin();
+        batch.setColor(Color.WHITE);
+        batch.draw(lowResRegion, 0, 0, VW, VH);   // single fullscreen draw (rotated)
+        batch.end();
+
+        // Reset transform (defensive for any future draws)
+        batch.setTransformMatrix(new Matrix4());
     }
 
     private void triggerGameOver() {
@@ -347,7 +386,7 @@ public class Main extends ApplicationAdapter {
 
     private void update(float dt) {
         long now = TimeUtils.millis();
-        dt = Math.min(dt, 1f/60f * 2f);
+        dt = Math.min(dt, 1f/30f * 2f);
 
         // GAME OVER gate — pause EVERYTHING until restart
         if (state == GameState.GAME_OVER) {
@@ -625,7 +664,6 @@ public class Main extends ApplicationAdapter {
     @Override public void resize(int width, int height) { viewport.update(width, height, true); }
 
     @Override public void dispose() {
-        shapes.dispose();
         batch.dispose();
         hudFont.dispose();
         bodyFont.dispose();
@@ -634,8 +672,10 @@ public class Main extends ApplicationAdapter {
         texRed.dispose();
         texGreen.dispose();
         texYellow.dispose();
+        white.dispose();
         music.dispose();
         sLaser.dispose();
         sExplosion.dispose();
+        lowResFbo.dispose();
     }
 }
