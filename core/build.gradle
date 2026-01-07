@@ -3,12 +3,13 @@ eclipse.project.name = appName + '-core'
 
 dependencies {
   api "com.badlogicgames.gdx:gdx:$gdxVersion"
-  api "com.badlogicgames.gdx:gdx-box2d:$gdxVersion"       // keep if you actually use Box2D
-
-  // <-- Add this unconditionally
+  api "com.badlogicgames.gdx:gdx-box2d:$gdxVersion" // keep if you actually use Box2D
   implementation "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
 
-  // keep the Graal block if you need it, but FreeType is now always present
+  // Add Jsoup dependency
+  implementation 'org.jsoup:jsoup:1.15.3' // Add this line for Jsoup
+
+  // Graal native support
   if (enableGraalNative == 'true') {
     implementation "io.github.berstanio:gdx-svmhelper-annotations:$graalHelperVersion"
     // implementation "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"  // redundant now

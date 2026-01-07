@@ -25,6 +25,7 @@ import com.badlogic.gdx.audio.Sound;
 import com.badlogic.gdx.audio.Music;
 import com.badlogic.gdx.graphics.Pixmap;
 
+
 public class Main extends ApplicationAdapter {
 
     // Low-res offscreen target (2x upscale to 1080x1920)
@@ -82,13 +83,15 @@ public class Main extends ApplicationAdapter {
     private static final long GAME_OVER_DELAY_MS = 5_000L;
     private long gameOverAtMs = 0L;
 
-    private static final String[] STORE_HOURS = {
-        "NERD HAVEN ARCADE","STORE HOURS:",
-        "MONDAY: CLOSED","TUESDAY: CLOSED",
-        "WEDNESDAY: CLOSED","THURSDAY: 3 pm - 10 pm",
-        "FRIDAY: NOON - 10 pm","SATURDAY: NOON - 10 pm",
-        "SUNDAY: NOON - 8 pm"
-    };
+    private static String[] STORE_HOURS;
+
+//    private static final String[] STORE_HOURS = {
+//        "NERD HAVEN ARCADE","STORE HOURS:",
+//        "MONDAY: CLOSED","TUESDAY: CLOSED",
+//        "WEDNESDAY: CLOSED","THURSDAY: 3 pm - 10 pm",
+//        "FRIDAY: NOON - 10 pm","SATURDAY: NOON - 10 pm",
+//        "SUNDAY: NOON - 8 pm"
+//    };
 
     // Shield pattern
     private static final String[] SHAPE = {
@@ -171,6 +174,31 @@ public class Main extends ApplicationAdapter {
         lowResRegion.getTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
 
         // Pre-cache store hours text positions so we don't do layout work each frame
+//        hoursCache = new BitmapFontCache(bodyFont, true);
+//        float lineH = 100f;
+//        float totalH = STORE_HOURS.length * lineH;
+//        float startY = (VH + totalH) * 0.5f;
+//        for (int i = 0; i < STORE_HOURS.length; i++) {
+//            layout.setText(bodyFont, STORE_HOURS[i]);
+//            float x = (VW - layout.width) * 0.5f;
+//            float y = startY - i * lineH;
+//            hoursCache.addText(STORE_HOURS[i], x, y);
+//        }
+
+        try {
+            STORE_HOURS = StoreHourScraper.fetchStoreHours();
+        } catch (Exception e) {
+            e.printStackTrace();
+            // Fallback to default hours in case of an error
+            STORE_HOURS = new String[]{
+                "NERD HAVEN ARCADE", "STORE HOURS:",
+                "MONDAY: CLOSED", "TUESDAY: CLOSED",
+                "WEDNESDAY: CLOSED", "THURSDAY: 3 pm - 10 pm",
+                "FRIDAY: NOON - 10 pm", "SATURDAY: NOON - 10 pm",
+                "SUNDAY: NOON - 8 pm"
+            };
+        }
+        // Initialize hoursCache after STORE_HOURS is set
         hoursCache = new BitmapFontCache(bodyFont, true);
         float lineH = 100f;
         float totalH = STORE_HOURS.length * lineH;
