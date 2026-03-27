@@ -85,13 +85,6 @@ public class Main extends ApplicationAdapter {
 
     private static String[] STORE_HOURS;
 
-//    private static final String[] STORE_HOURS = {
-//        "NERD HAVEN ARCADE","STORE HOURS:",
-//        "MONDAY: CLOSED","TUESDAY: CLOSED",
-//        "WEDNESDAY: CLOSED","THURSDAY: 3 pm - 10 pm",
-//        "FRIDAY: NOON - 10 pm","SATURDAY: NOON - 10 pm",
-//        "SUNDAY: NOON - 8 pm"
-//    };
 
     // Shield pattern
     private static final String[] SHAPE = {
@@ -117,26 +110,33 @@ public class Main extends ApplicationAdapter {
 
         batch  = new SpriteBatch();
 
-        // -- Pixel font from assets/Font/Pixeled.ttf
+        // -- Pixel font generation with 5px Outline AND Drop Shadow
         FreeTypeFontGenerator gen = new FreeTypeFontGenerator(Gdx.files.internal("Font/Pixeled.ttf"));
         FreeTypeFontGenerator.FreeTypeFontParameter p = new FreeTypeFontGenerator.FreeTypeFontParameter();
 
-        // Crisp pixel look
+        // 1. HUD Font (Smaller, no outline)
+        p.size = MathUtils.round(VH * 0.016f);
         p.minFilter = Texture.TextureFilter.Nearest;
         p.magFilter = Texture.TextureFilter.Nearest;
-        p.hinting = FreeTypeFontGenerator.Hinting.None;
-        p.borderStraight = true;
-
-        // Sizes relative to your virtual height
-        p.size = MathUtils.round(VH * 0.016f); // ~48 @ 1920
         hudFont = gen.generateFont(p);
 
-        p.size = MathUtils.round(VH * 0.025f); // ~40 @ 1920
-        bodyFont = gen.generateFont(p);
+        // 2. Body Font (Large with Maximum Visibility)
+        p.size = MathUtils.round(VH * 0.025f);
+        p.color = Color.WHITE;        // Inner letter color
 
+        // --- THE OUTLINE (Sharp edges) ---
+        p.borderWidth = 5f;
+        p.borderColor = Color.BLACK;
+        p.borderStraight = true;
+
+        // --- THE SHADOW (Adds depth/separation) ---
+        p.shadowOffsetX = 4;          // Shifts shadow right
+        p.shadowOffsetY = 4;          // Shifts shadow down
+        p.shadowColor = new Color(0, 0, 0, 0.8f); // 80% opaque black
+
+        bodyFont = gen.generateFont(p);
         gen.dispose();
 
-        // Keep text sharp
         hudFont.setUseIntegerPositions(true);
         bodyFont.setUseIntegerPositions(true);
 
@@ -144,7 +144,7 @@ public class Main extends ApplicationAdapter {
         for (TextureRegion tr : hudFont.getRegions())  tr.getTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         for (TextureRegion tr : bodyFont.getRegions()) tr.getTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
 
-        // Load sprites from assets/Graphics
+        // Load sprites
         texPlayer = loadNearest("Graphics/Player.png");
         texExtra  = loadNearest("Graphics/Extra.png");
         texRed    = loadNearest("Graphics/Red.png");
@@ -159,10 +159,10 @@ public class Main extends ApplicationAdapter {
         white.setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
         pm.dispose();
 
-        // Audio (exact filenames under assets/Audio)
+        // Audio
         music = Gdx.audio.newMusic(Gdx.files.internal("Audio/Music.wav"));
         music.setLooping(true);
-        music.setVolume(0.5f); // tweak
+        music.setVolume(0.5f);
 
         sLaser     = Gdx.audio.newSound(Gdx.files.internal("Audio/Laser.wav"));
         sExplosion = Gdx.audio.newSound(Gdx.files.internal("Audio/Explosion.wav"));
@@ -170,49 +170,39 @@ public class Main extends ApplicationAdapter {
         // FBO for low-res rendering
         lowResFbo = new FrameBuffer(Pixmap.Format.RGB565, LOW_W, LOW_H, false);
         lowResRegion = new TextureRegion(lowResFbo.getColorBufferTexture());
-        lowResRegion.flip(false, true); // FBO textures come upside-down
+        lowResRegion.flip(false, true);
         lowResRegion.getTexture().setFilter(Texture.TextureFilter.Nearest, Texture.TextureFilter.Nearest);
 
-        // Pre-cache store hours text positions so we don't do layout work each frame
-//        hoursCache = new BitmapFontCache(bodyFont, true);
-//        float lineH = 100f;
-//        float totalH = STORE_HOURS.length * lineH;
-//        float startY = (VH + totalH) * 0.5f;
-//        for (int i = 0; i < STORE_HOURS.length; i++) {
-//            layout.setText(bodyFont, STORE_HOURS[i]);
-//            float x = (VW - layout.width) * 0.5f;
-//            float y = startY - i * lineH;
-//            hoursCache.addText(STORE_HOURS[i], x, y);
-//        }
-
+        // Fetch Store Hours from Scraper
         try {
             STORE_HOURS = StoreHourScraper.fetchStoreHours();
         } catch (Exception e) {
             e.printStackTrace();
-            // Fallback to default hours in case of an error
             STORE_HOURS = new String[]{
                 "NERD HAVEN ARCADE", "STORE HOURS:",
                 "MONDAY: CLOSED", "TUESDAY: CLOSED",
-                "WEDNESDAY: CLOSED", "THURSDAY: 3 pm - 10 pm",
-                "FRIDAY: NOON - 10 pm", "SATURDAY: NOON - 10 pm",
-                "SUNDAY: NOON - 8 pm"
+                "WEDNESDAY: CLOSED", "THURSDAY: 3 PM - 10 PM",
+                "FRIDAY: NOON - 10 PM", "SATURDAY: NOON - 10 PM",
+                "SUNDAY: NOON - 8 PM"
             };
         }
-        // Initialize hoursCache after STORE_HOURS is set
+
+        // Cache the store hours text for performance
         hoursCache = new BitmapFontCache(bodyFont, true);
-        float lineH = 100f;
+        float lineH = 80f; // Adjusted spacing to fit notices on screen
         float totalH = STORE_HOURS.length * lineH;
         float startY = (VH + totalH) * 0.5f;
+
         for (int i = 0; i < STORE_HOURS.length; i++) {
+            if (STORE_HOURS[i] == null) continue;
             layout.setText(bodyFont, STORE_HOURS[i]);
             float x = (VW - layout.width) * 0.5f;
             float y = startY - i * lineH;
             hoursCache.addText(STORE_HOURS[i], x, y);
         }
 
-        // Small GL driver hints for Pi
+        // Game Initialization
         Gdx.gl.glDisable(GL20.GL_DITHER);
-
         initGame();
         state = GameState.PLAYING;
         gameOverAtMs = 0L;
@@ -321,28 +311,33 @@ public class Main extends ApplicationAdapter {
         batch.setProjectionMatrix(cam.combined);
         batch.begin();
 
-        // OPAQUE PASS (blending OFF): stars, shields, lasers, lives
-        batch.disableBlending();
+        // 1. ENABLE BLENDING AT THE TOP
+        // This is required for the 0.3f transparency to actually work
+        batch.enableBlending();
 
-        // Stars (2x2)
-        batch.setColor(Color.WHITE);
+        // 2. SET GLOBAL GAME TRANSPARENCY (0.3f = 30% brightness)
+        batch.setColor(1f, 1f, 1f, 0.3f);
+
+        // --- DRAW GAME OBJECTS (All will be transparent) ---
+
+        // Stars
         for (Star s : stars) batch.draw(white, s.x - 1f, s.y - 1f, 2f, 2f);
 
-        // Shields
-        for (Block b : blocks) { batch.setColor(b.color); batch.draw(white, b.x, b.y, b.w, b.h); }
-        batch.setColor(Color.WHITE);
+        // Shields (Applying 0.3f alpha to block colors)
+        for (Block b : blocks) {
+            batch.setColor(b.color.r, b.color.g, b.color.b, 0.3f);
+            batch.draw(white, b.x, b.y, b.w, b.h);
+        }
+        batch.setColor(1f, 1f, 1f, 0.3f); // Reset to game transparency
 
         // Lasers
         for (Laser l : playerLasers) batch.draw(white, l.x - 4f, l.y, 8f, 20f);
-        batch.setColor(1f, .6f, .8f, 1f);
+        batch.setColor(1f, .6f, .8f, 0.3f); // Alien laser color at 30% alpha
         for (Laser l : alienLasers)  batch.draw(white, l.x - 4f, l.y, 8f, 20f);
-        batch.setColor(Color.WHITE);
+        batch.setColor(1f, 1f, 1f, 0.3f);
 
         // Lives
         for (int i = 0; i < lives - 1; i++) batch.draw(white, VW - 40f - i*30f, VH - 28f, 24f, 12f);
-
-        // ALPHA PASS (blending ON): sprites, text, flash
-        batch.enableBlending();
 
         // Aliens / UFO / Player
         for (Alien a : aliens) {
@@ -352,22 +347,24 @@ public class Main extends ApplicationAdapter {
         if (extra != null) batch.draw(texExtra, extra.x, extra.y, 64f, 32f);
         batch.draw(texPlayer, player.x, player.y, player.w, player.h);
 
-        // HUD: Score
+        // 3. RESET TO FULL OPAQUE (1.0f) FOR THE TEXT
+        // This makes the lettering 100% solid white with the black outline
+        batch.setColor(Color.WHITE);
+
+        // HUD Score
         layout.setText(hudFont, "Score: " + score);
-        hudFont.setColor(Color.WHITE);
         hudFont.draw(batch, layout, 10f, VH - 18f);
 
-        // GAME OVER title at top
+        // Game Over Title
         if (state == GameState.GAME_OVER) {
-            String title = "GAME OVER";
-            layout.setText(bodyFont, title);
+            layout.setText(bodyFont, "GAME OVER");
             bodyFont.draw(batch, layout, (VW - layout.width) * 0.5f, VH - 60f);
         }
 
-        // Store hours (cached)
+        // Store Hours (Solid text sitting on top of ghosted game)
         hoursCache.draw(batch);
 
-        // Flash overlay
+        // Flash overlay (uses its own alpha logic)
         if (flashAlpha > 0f) {
             batch.setColor(1f, 1f, 1f, flashAlpha);
             batch.draw(white, 0, 0, VW, VH);
@@ -377,28 +374,24 @@ public class Main extends ApplicationAdapter {
         batch.end();
         lowResFbo.end();
 
-        // --- Upscale once to the window (rotate to portrait while OS stays landscape) ---
+        // --- Upscale / Rotation Logic ---
         int bw = Gdx.graphics.getBackBufferWidth();
         int bh = Gdx.graphics.getBackBufferHeight();
         Gdx.gl.glViewport(0, 0, bw, bh);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
-        // Screen-space ortho
         batch.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0, bw, bh));
-
-        // Rotate CCW 90°, then scale to fill exactly (mapping VWxVH -> bxh)
         Matrix4 xf = new Matrix4()
-            .translate(bw, 0, 0)                // move origin to right edge
-            .rotate(0, 0, 1, 90)                // rotate portrait -> landscape
-            .scale((float) bh / VW, (float) bw / VH, 1f); // exact aspect match
+            .translate(bw, 0, 0)
+            .rotate(0, 0, 1, 90)
+            .scale((float) bh / VW, (float) bw / VH, 1f);
 
         batch.setTransformMatrix(xf);
         batch.begin();
         batch.setColor(Color.WHITE);
-        batch.draw(lowResRegion, 0, 0, VW, VH);   // single fullscreen draw (rotated)
+        batch.draw(lowResRegion, 0, 0, VW, VH);
         batch.end();
 
-        // Reset transform (defensive for any future draws)
         batch.setTransformMatrix(new Matrix4());
     }
 
