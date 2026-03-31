@@ -35,6 +35,8 @@ public class Main extends ApplicationAdapter {
 
     // Cache for static "store hours" text (so we don't recompute every frame)
     private BitmapFontCache hoursCache;
+    private BitmapFontCache noticeCache; // New cache for red text
+
 
     // Portrait virtual size
     private static final float VW = 1080f;
@@ -137,6 +139,8 @@ public class Main extends ApplicationAdapter {
         bodyFont = gen.generateFont(p);
         gen.dispose();
 
+        bodyFont.getData().markupEnabled = true;
+
         hudFont.setUseIntegerPositions(true);
         bodyFont.setUseIntegerPositions(true);
 
@@ -179,27 +183,64 @@ public class Main extends ApplicationAdapter {
         } catch (Exception e) {
             e.printStackTrace();
             STORE_HOURS = new String[]{
-                "NERD HAVEN ARCADE", "STORE HOURS:",
-                "MONDAY: CLOSED", "TUESDAY: CLOSED",
-                "WEDNESDAY: CLOSED", "THURSDAY: 3 PM - 10 PM",
-                "FRIDAY: NOON - 10 PM", "SATURDAY: NOON - 10 PM",
+                "NERD HAVEN ARCADE",
+                "[RED]!!! NOTICE: NO OUTSIDE FOOD !!![]", // This line is Red
+                "STORE HOURS:",
+                "MONDAY: CLOSED",
+                "TUESDAY: CLOSED",
+                "WEDNESDAY: CLOSED",
+                "THURSDAY: 3 PM - 10 PM",
+                "FRIDAY: NOON - 10 PM",
+                "SATURDAY: NOON - 10 PM",
                 "SUNDAY: NOON - 8 PM"
             };
         }
 
-        // Cache the store hours text for performance
-        hoursCache = new BitmapFontCache(bodyFont, true);
-        float lineH = 80f; // Adjusted spacing to fit notices on screen
-        float totalH = STORE_HOURS.length * lineH;
-        float startY = (VH + totalH) * 0.5f;
+        // 1. Temporary lists to group the data
+        Array<String> hoursLines = new Array<>();
+        Array<String> noticeLines = new Array<>();
 
-        for (int i = 0; i < STORE_HOURS.length; i++) {
-            if (STORE_HOURS[i] == null) continue;
-            layout.setText(bodyFont, STORE_HOURS[i]);
-            float x = (VW - layout.width) * 0.5f;
-            float y = startY - i * lineH;
-            hoursCache.addText(STORE_HOURS[i], x, y);
+        // 2. Pre-sort lines into chunks
+        for (String rawLine : STORE_HOURS) {
+            if (rawLine == null) continue;
+            String line = rawLine.replaceAll("\\[.*?\\]", "");
+
+            // If it's a notice, put it in the notice chunk
+            if (line.toUpperCase().contains("NOTICE") || noticeLines.size > 0 && !line.toUpperCase().contains("STORE HOURS")) {
+                // This logic keeps adding to notices until it hits "STORE HOURS" again
+                if (line.toUpperCase().contains("STORE HOURS")) hoursLines.add(line);
+                else noticeLines.add(line);
+            } else {
+                hoursLines.add(line);
+            }
         }
+
+        // 3. Clear and build caches in the new order (Hours first, then Notice chunk)
+        hoursCache = new BitmapFontCache(bodyFont, true);
+        noticeCache = new BitmapFontCache(bodyFont, true);
+
+        float lineH = 80f;
+        int totalCount = hoursLines.size + noticeLines.size;
+        float startY = (VH + (totalCount * lineH)) * 0.5f;
+
+        int currentLine = 0;
+
+        // Draw standard hours first
+        for (String line : hoursLines) {
+            layout.setText(bodyFont, line);
+            hoursCache.addText(line, (VW - layout.width) * 0.5f, startY - currentLine * lineH);
+            currentLine++;
+        }
+
+        // Draw all notices as one red chunk at the bottom
+        for (String line : noticeLines) {
+            layout.setText(bodyFont, line);
+            noticeCache.addText(line, (VW - layout.width) * 0.5f, startY - currentLine * lineH);
+            currentLine++;
+        }
+
+        // Force the notice chunk to be red
+        noticeCache.setColors(Color.RED);
 
         // Game Initialization
         Gdx.gl.glDisable(GL20.GL_DITHER);
@@ -208,6 +249,7 @@ public class Main extends ApplicationAdapter {
         gameOverAtMs = 0L;
         if (music != null && !music.isPlaying()) music.play();
     }
+
 
     private Texture loadNearest(String path) {
         Texture t = new Texture(Gdx.files.internal(path));
@@ -341,26 +383,40 @@ public class Main extends ApplicationAdapter {
         if (extra != null) batch.draw(texExtra, extra.x, extra.y, 64f, 32f);
         batch.draw(texPlayer, player.x, player.y, player.w, player.h);
 
-        // --- FIXED SCORE DRAWING ---
-        // Explicitly set the font color alpha to 0.3f to match other assets
+        // --- SCORE DRAWING (0.3f) ---
         hudFont.setColor(1f, 1f, 1f, 0.3f);
         layout.setText(hudFont, "Score: " + score);
         hudFont.draw(batch, layout, 10f, VH - 18f);
 
         // 2. RESET TO SOLID (1.0f) FOR THE STORE HOURS
         batch.setColor(Color.WHITE);
-        // Also reset the font colors to opaque so they don't stay transparent
         hudFont.setColor(Color.WHITE);
         bodyFont.setColor(Color.WHITE);
 
-        // GAME OVER
+// --- UPDATED GAME OVER SECTION ---
         if (state == GameState.GAME_OVER) {
+            // Set font to Red with 0.3 Alpha
+            bodyFont.setColor(1f, 0f, 0f, 0.3f);
+            // Set batch to match transparency
+            batch.setColor(1f, 1f, 1f, 0.3f);
+
             layout.setText(bodyFont, "GAME OVER");
             bodyFont.draw(batch, layout, (VW - layout.width) * 0.5f, VH - 60f);
+
+            // Reset back to Solid White immediately for the Store Hours
+            bodyFont.setColor(Color.WHITE);
+            batch.setColor(Color.WHITE);
         }
 
-        // Store Hours (SOLID BRIGHT)
+// --- STORE HOURS & NOTICES (Drawn Opaque) ---
         hoursCache.draw(batch);
+        noticeCache.draw(batch);
+
+
+        // Switch batch to RED to force the entire notice line red
+        batch.setColor(Color.RED);
+        noticeCache.draw(batch);
+        batch.setColor(Color.WHITE); // Reset for everything else
 
         // Flash overlay
         if (flashAlpha > 0f) {
@@ -388,7 +444,6 @@ public class Main extends ApplicationAdapter {
         batch.end();
         batch.setTransformMatrix(new Matrix4());
     }
-
 
     private void triggerGameOver() {
         if (state == GameState.GAME_OVER) return;
