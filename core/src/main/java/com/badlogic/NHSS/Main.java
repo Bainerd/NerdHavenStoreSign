@@ -301,7 +301,6 @@ public class Main extends ApplicationAdapter {
         float dt = Gdx.graphics.getDeltaTime();
         update(dt);
 
-        // --- Draw scene at half resolution ---
         lowResFbo.begin();
         Gdx.gl.glViewport(0, 0, LOW_W, LOW_H);
         Gdx.gl.glClearColor(30/255f, 30/255f, 30/255f, 1f);
@@ -311,28 +310,23 @@ public class Main extends ApplicationAdapter {
         batch.setProjectionMatrix(cam.combined);
         batch.begin();
 
-        // 1. ENABLE BLENDING AT THE TOP
-        // This is required for the 0.3f transparency to actually work
+        // 1. ENABLE BLENDING AND DIM GAME OBJECTS (0.3f transparency)
         batch.enableBlending();
-
-        // 2. SET GLOBAL GAME TRANSPARENCY (0.3f = 30% brightness)
         batch.setColor(1f, 1f, 1f, 0.3f);
-
-        // --- DRAW GAME OBJECTS (All will be transparent) ---
 
         // Stars
         for (Star s : stars) batch.draw(white, s.x - 1f, s.y - 1f, 2f, 2f);
 
-        // Shields (Applying 0.3f alpha to block colors)
+        // Shields
         for (Block b : blocks) {
             batch.setColor(b.color.r, b.color.g, b.color.b, 0.3f);
             batch.draw(white, b.x, b.y, b.w, b.h);
         }
-        batch.setColor(1f, 1f, 1f, 0.3f); // Reset to game transparency
+        batch.setColor(1f, 1f, 1f, 0.3f);
 
         // Lasers
         for (Laser l : playerLasers) batch.draw(white, l.x - 4f, l.y, 8f, 20f);
-        batch.setColor(1f, .6f, .8f, 0.3f); // Alien laser color at 30% alpha
+        batch.setColor(1f, .6f, .8f, 0.3f);
         for (Laser l : alienLasers)  batch.draw(white, l.x - 4f, l.y, 8f, 20f);
         batch.setColor(1f, 1f, 1f, 0.3f);
 
@@ -347,24 +341,28 @@ public class Main extends ApplicationAdapter {
         if (extra != null) batch.draw(texExtra, extra.x, extra.y, 64f, 32f);
         batch.draw(texPlayer, player.x, player.y, player.w, player.h);
 
-        // 3. RESET TO FULL OPAQUE (1.0f) FOR THE TEXT
-        // This makes the lettering 100% solid white with the black outline
-        batch.setColor(Color.WHITE);
-
-        // HUD Score
+        // --- FIXED SCORE DRAWING ---
+        // Explicitly set the font color alpha to 0.3f to match other assets
+        hudFont.setColor(1f, 1f, 1f, 0.3f);
         layout.setText(hudFont, "Score: " + score);
         hudFont.draw(batch, layout, 10f, VH - 18f);
 
-        // Game Over Title
+        // 2. RESET TO SOLID (1.0f) FOR THE STORE HOURS
+        batch.setColor(Color.WHITE);
+        // Also reset the font colors to opaque so they don't stay transparent
+        hudFont.setColor(Color.WHITE);
+        bodyFont.setColor(Color.WHITE);
+
+        // GAME OVER
         if (state == GameState.GAME_OVER) {
             layout.setText(bodyFont, "GAME OVER");
             bodyFont.draw(batch, layout, (VW - layout.width) * 0.5f, VH - 60f);
         }
 
-        // Store Hours (Solid text sitting on top of ghosted game)
+        // Store Hours (SOLID BRIGHT)
         hoursCache.draw(batch);
 
-        // Flash overlay (uses its own alpha logic)
+        // Flash overlay
         if (flashAlpha > 0f) {
             batch.setColor(1f, 1f, 1f, flashAlpha);
             batch.draw(white, 0, 0, VW, VH);
@@ -374,26 +372,23 @@ public class Main extends ApplicationAdapter {
         batch.end();
         lowResFbo.end();
 
-        // --- Upscale / Rotation Logic ---
+        // --- Upscale / Rotation ---
         int bw = Gdx.graphics.getBackBufferWidth();
         int bh = Gdx.graphics.getBackBufferHeight();
         Gdx.gl.glViewport(0, 0, bw, bh);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
 
         batch.setProjectionMatrix(new Matrix4().setToOrtho2D(0, 0, bw, bh));
-        Matrix4 xf = new Matrix4()
-            .translate(bw, 0, 0)
-            .rotate(0, 0, 1, 90)
-            .scale((float) bh / VW, (float) bw / VH, 1f);
+        Matrix4 xf = new Matrix4().translate(bw, 0, 0).rotate(0, 0, 1, 90).scale((float) bh / VW, (float) bw / VH, 1f);
 
         batch.setTransformMatrix(xf);
         batch.begin();
         batch.setColor(Color.WHITE);
         batch.draw(lowResRegion, 0, 0, VW, VH);
         batch.end();
-
         batch.setTransformMatrix(new Matrix4());
     }
+
 
     private void triggerGameOver() {
         if (state == GameState.GAME_OVER) return;
@@ -684,19 +679,30 @@ public class Main extends ApplicationAdapter {
 
     @Override public void resize(int width, int height) { viewport.update(width, height, true); }
 
-    @Override public void dispose() {
-        batch.dispose();
-        hudFont.dispose();
-        bodyFont.dispose();
-        texPlayer.dispose();
-        texExtra.dispose();
-        texRed.dispose();
-        texGreen.dispose();
-        texYellow.dispose();
-        white.dispose();
-        music.dispose();
-        sLaser.dispose();
-        sExplosion.dispose();
-        lowResFbo.dispose();
+    @Override
+    public void dispose() {
+        // 1. UI & Graphics
+        if (batch != null) batch.dispose();
+        if (hudFont != null) hudFont.dispose();
+        if (bodyFont != null) bodyFont.dispose();
+        if (lowResFbo != null) lowResFbo.dispose();
+
+        // 2. Textures
+        if (texPlayer != null) texPlayer.dispose();
+        if (texExtra != null) texExtra.dispose();
+        if (texRed != null) texRed.dispose();
+        if (texGreen != null) texGreen.dispose();
+        if (texYellow != null) texYellow.dispose();
+        if (white != null) white.dispose();
+
+        // 3. Audio
+        if (music != null) music.dispose();
+        if (sLaser != null) sLaser.dispose();
+        if (sExplosion != null) sExplosion.dispose();
+
+        // 4. Clear collections (not strictly disposables, but good for GC)
+        stars.clear();
+        blocks.clear();
+        aliens.clear();
     }
 }
